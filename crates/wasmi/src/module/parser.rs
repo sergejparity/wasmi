@@ -13,7 +13,7 @@ use super::{
     Read,
 };
 use crate::{
-    engine::{CompiledFunc, FuncTranslatorAllocations},
+    engine::{CompiledFunc, FuncTranslatorAllocations, FuncTranslatorAllocations2},
     Engine,
     FuncType,
     MemoryType,
@@ -74,6 +74,7 @@ pub struct ModuleParser<'engine> {
 #[derive(Default)]
 pub struct ReusableAllocations {
     pub translation: FuncTranslatorAllocations,
+    pub translation2: FuncTranslatorAllocations2,
     pub validation: FuncValidatorAllocations,
 }
 
@@ -477,16 +478,17 @@ impl<'engine> ModuleParser<'engine> {
     }
 
     /// Returns the next `FuncIdx` for processing of its function body.
-    fn next_func(&mut self) -> (FuncIdx, CompiledFunc) {
+    fn next_func(&mut self) -> (FuncIdx, CompiledFunc, CompiledFunc) {
         let index = self.compiled_funcs;
         let compiled_func = self.builder.compiled_funcs[index as usize];
+        let compiled_func_2 = self.builder.compiled_funcs_2[index as usize];
         self.compiled_funcs += 1;
         // We have to adjust the initial func reference to the first
         // internal function before we process any of the internal functions.
         let len_func_imports = u32::try_from(self.builder.imports.funcs.len())
             .unwrap_or_else(|_| panic!("too many imported functions"));
         let func_idx = FuncIdx::from(index + len_func_imports);
-        (func_idx, compiled_func)
+        (func_idx, compiled_func, compiled_func_2)
     }
 
     /// Process a single module code section entry.
@@ -501,17 +503,17 @@ impl<'engine> ModuleParser<'engine> {
     ///
     /// If the function body fails to validate.
     fn process_code_entry(&mut self, func_body: FunctionBody) -> Result<(), ModuleError> {
-        let (func, compiled_func) = self.next_func();
+        let (func, compiled_func, compiled_func_2) = self.next_func();
         let validator = self.validator.code_section_entry(&func_body)?;
         let module_resources = ModuleResources::new(&self.builder);
         let allocations = take(&mut self.allocations);
         let allocations = translate(
             func,
-            compiled_func,
+            (compiled_func, compiled_func_2),
             func_body,
             validator.into_validator(allocations.validation),
             module_resources,
-            allocations.translation,
+            (allocations.translation, allocations.translation2),
         )?;
         let _ = replace(&mut self.allocations, allocations);
         Ok(())

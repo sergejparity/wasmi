@@ -1,5 +1,12 @@
 //! Datastructure to efficiently store function bodies and their instructions.
 
+mod regmach;
+
+pub use self::regmach::{
+    CodeMap as CodeMap2,
+    FuncHeader as FuncHeader2,
+    InstructionPtr as InstructionPtr2,
+};
 use super::Instruction;
 use alloc::vec::Vec;
 use wasmi_arena::ArenaIndex;
@@ -212,7 +219,7 @@ impl CodeMap {
     /// This is important to synthesize how many instructions there are in
     /// the function referred to by [`CompiledFunc`].
     #[cfg(test)]
-    pub fn instr_end(&self, func_body: CompiledFunc) -> usize {
+    fn instr_end(&self, func_body: CompiledFunc) -> usize {
         self.headers
             .get(func_body.into_usize() + 1)
             .map(|header| header.iref.to_usize())

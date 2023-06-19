@@ -214,14 +214,26 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@2656b87321093db1cb55fbd73183d195214fdfd1 # v2.5.0
         with:
+<<<<<<< HEAD
             cache-on-failure: true
             cache-all-crates: true
       - name: Clippy (--lib)
+=======
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-miri-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-miri-
+      - name: Miri (--lib)
+>>>>>>> rf-engine-regmach
         uses: actions-rs/cargo@v1
         with:
           command: miri
           args: test --lib --workspace
-      - name: Clippy (--doc)
+      - name: Miri (--doc)
         uses: actions-rs/cargo@v1
         with:
           command: miri

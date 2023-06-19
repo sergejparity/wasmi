@@ -1,6 +1,9 @@
 //! The `wasmi` interpreter.
 
+#![allow(dead_code)] // TODO: remove
+
 pub mod bytecode;
+mod bytecode2;
 mod cache;
 pub mod code_map;
 mod config;
@@ -18,11 +21,13 @@ mod tests;
 
 pub use self::{
     bytecode::DropKeep,
-    code_map::CompiledFunc,
-    config::{Config, FuelConsumptionMode},
+    bytecode2::Instruction as Instruction2,
+    code_map::{CodeMap2, CompiledFunc},
+    config::{Config, EngineBackend, FuelConsumptionMode},
     func_builder::{
         FuncBuilder,
         FuncTranslatorAllocations,
+        FuncTranslatorAllocations2,
         Instr,
         RelativeDepth,
         TranslationError,
@@ -148,6 +153,16 @@ impl Engine {
         self.inner.alloc_const(value)
     }
 
+    /// Returns the [`UntypedValue`] of the [`ConstRef`] if any.
+    ///
+    /// # Note
+    ///
+    /// This is a test API and only meant for testing purposes.
+    #[cfg(test)]
+    pub(super) fn get_const(&self, cref: ConstRef) -> Option<UntypedValue> {
+        self.inner.get_const(cref)
+    }
+
     /// Resolves a deduplicated function type into a [`FuncType`] entity.
     ///
     /// # Panics
@@ -166,6 +181,13 @@ impl Engine {
     /// Returns a [`CompiledFunc`] reference to allow accessing the allocated [`CompiledFunc`].
     pub(super) fn alloc_func(&self) -> CompiledFunc {
         self.inner.alloc_func()
+    }
+
+    /// Allocates a new uninitialized [`CompiledFunc`] to the [`Engine`].
+    ///
+    /// Returns a [`CompiledFunc`] reference to allow accessing the allocated [`CompiledFunc`].
+    pub(super) fn alloc_func_2(&self) -> CompiledFunc {
+        self.inner.alloc_func_2()
     }
 
     /// Initializes the uninitialized [`CompiledFunc`] for the [`Engine`].
@@ -187,6 +209,19 @@ impl Engine {
             .init_func(func, len_locals, local_stack_height, instrs)
     }
 
+    /// Initializes the uninitialized [`CompiledFunc`] for the [`Engine`].
+    ///
+    /// # Panics
+    ///
+    /// - If `func` is an invalid [`CompiledFunc`] reference for this [`CodeMap`].
+    /// - If `func` refers to an already initialized [`CompiledFunc`].
+    pub(super) fn init_func_2<I>(&self, func: CompiledFunc, len_registers: u16, instrs: I)
+    where
+        I: IntoIterator<Item = Instruction2>,
+    {
+        self.inner.init_func_2(func, len_registers, instrs)
+    }
+
     /// Resolves the [`CompiledFunc`] to the underlying `wasmi` bytecode instructions.
     ///
     /// # Note
@@ -205,6 +240,29 @@ impl Engine {
         index: usize,
     ) -> Option<Instruction> {
         self.inner.resolve_instr(func_body, index)
+    }
+
+    /// Resolves the [`CompiledFunc`] to the underlying `wasmi` bytecode instructions.
+    ///
+    /// # Note
+    ///
+    /// - This is a variant of [`Engine::resolve_instr`] that returns register
+    ///   machine based bytecode instructions.
+    /// - This API is mainly intended for unit testing purposes and shall not be used
+    ///   outside of this context. The function bodies are intended to be data private
+    ///   to the `wasmi` interpreter.
+    ///
+    /// # Panics
+    ///
+    /// - If the [`CompiledFunc`] is invalid for the [`Engine`].
+    /// - If register machine bytecode translation is disabled.
+    #[cfg(test)]
+    pub(crate) fn resolve_instr_2(
+        &self,
+        func_body: CompiledFunc,
+        index: usize,
+    ) -> Option<Instruction2> {
+        self.inner.resolve_instr_2(func_body, index)
     }
 
     /// Executes the given [`Func`] with parameters `params`.
@@ -402,11 +460,28 @@ impl EngineInner {
         self.res.write().const_pool.alloc(value)
     }
 
+    /// Returns the [`UntypedValue`] of the [`ConstRef`] if any.
+    ///
+    /// # Note
+    ///
+    /// This is a test API and only meant for testing purposes.
+    #[cfg(test)]
+    pub(super) fn get_const(&self, cref: ConstRef) -> Option<UntypedValue> {
+        self.res.read().const_pool.get(cref)
+    }
+
     /// Allocates a new uninitialized [`CompiledFunc`] to the [`EngineInner`].
     ///
     /// Returns a [`CompiledFunc`] reference to allow accessing the allocated [`CompiledFunc`].
     fn alloc_func(&self) -> CompiledFunc {
         self.res.write().code_map.alloc_func()
+    }
+
+    /// Allocates a new uninitialized [`CompiledFunc`] to the [`EngineInner`].
+    ///
+    /// Returns a [`CompiledFunc`] reference to allow accessing the allocated [`CompiledFunc`].
+    fn alloc_func_2(&self) -> CompiledFunc {
+        self.res.write().code_map_2.alloc_func()
     }
 
     /// Initializes the uninitialized [`CompiledFunc`] for the [`EngineInner`].
@@ -430,6 +505,22 @@ impl EngineInner {
             .init_func(func, len_locals, local_stack_height, instrs)
     }
 
+    /// Initializes the uninitialized [`CompiledFunc`] for the [`EngineInner`].
+    ///
+    /// # Panics
+    ///
+    /// - If `func` is an invalid [`CompiledFunc`] reference for this [`CodeMap`].
+    /// - If `func` refers to an already initialized [`CompiledFunc`].
+    fn init_func_2<I>(&self, func: CompiledFunc, len_registers: u16, instrs: I)
+    where
+        I: IntoIterator<Item = Instruction2>,
+    {
+        self.res
+            .write()
+            .code_map_2
+            .init_func(func, len_registers, instrs)
+    }
+
     fn resolve_func_type<F, R>(&self, func_type: &DedupFuncType, f: F) -> R
     where
         F: FnOnce(&FuncType) -> R,
@@ -443,6 +534,20 @@ impl EngineInner {
             .read()
             .code_map
             .get_instr(func_body, index)
+            .copied()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resolve_instr_2(
+        &self,
+        func_body: CompiledFunc,
+        index: usize,
+    ) -> Option<Instruction2> {
+        self.res
+            .read()
+            .code_map_2
+            .get_instrs(func_body)
+            .get(index)
             .copied()
     }
 
@@ -550,6 +655,8 @@ impl EngineInner {
 pub struct EngineResources {
     /// Stores all Wasm function bodies that the interpreter is aware of.
     code_map: CodeMap,
+    /// Stores information about all compiled functions.
+    code_map_2: CodeMap2,
     /// A pool of reusable, deduplicated constant values.
     const_pool: ConstPool,
     /// Deduplicated function types.
@@ -567,6 +674,7 @@ impl EngineResources {
         let engine_idx = EngineIdx::new();
         Self {
             code_map: CodeMap::default(),
+            code_map_2: CodeMap2::default(),
             const_pool: ConstPool::default(),
             func_types: FuncTypeRegistry::new(engine_idx),
         }
